@@ -28,24 +28,38 @@ def _main_dora(io, shared_dir):
     data_files = []
 
     node = dora.Node()
+    previous_observation_id = None
     for event in node:
         if event["type"] != "INPUT":
             continue
 
         # Main process
         def prepare_request():
+            nonlocal previous_observation_id
             observation = event["value"]
+            observation_id = observation.field("observation_id")[0].as_py()
+            # The observation id increments per observation and drops back to a
+            # lower value when a new episode starts, so a decrease (or the very
+            # first observation) signals a reset to the policy server.
+            reset = (
+                previous_observation_id is None
+                or observation_id < previous_observation_id
+            )
+            previous_observation_id = observation_id
             data_file = tempfile.NamedTemporaryFile(
                 suffix=".arrow", dir=shared_dir, delete_on_close=False
             )
             record_batch = pa.RecordBatch.from_struct_array(observation)
+            record_batch = record_batch.append_column(
+                "reset", pa.array([reset], type=pa.bool_())
+            )
             with pa.output_stream(data_file) as output:
                 with pa.ipc.new_file(output, record_batch.schema) as writer:
                     writer.write(record_batch)
             data_files.append(data_file)
             if len(data_files) > n_keep_data:
                 data_files.pop(0)
-            return {
+            return reset, {
                 "name": "inference",
                 "data_path": data_file.name,
                 "metadata": event["metadata"],
@@ -73,7 +87,7 @@ def _main_dora(io, shared_dir):
         #     "camera_ceiling": pa.list_(pa.uint8()),
         #     }
         #   }
-        request = prepare_request()
+        reset, request = prepare_request()
         io.write(json.dumps(request) + "\n")
         io.flush()
 
@@ -94,7 +108,10 @@ def _main_dora(io, shared_dir):
             break
         actions = json.loads(response)
         if actions["positions"]:
-            metadata = {"interval": actions["interval"]}
+            # "reset" signals that these actions are the first of a new episode,
+            # so downstream nodes can drop any state carried over from the
+            # previous episode.
+            metadata = {"interval": actions["interval"], "reset": reset}
             if "cutoff_hz" in actions:
                 metadata["cutoff_hz"] = actions["cutoff_hz"]
             node.send_output(
