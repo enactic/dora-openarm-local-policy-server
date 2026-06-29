@@ -14,8 +14,6 @@
 
 """Node to communicate with a local policy server."""
 
-from wsgiref.util import request_uri
-
 import argparse
 import dora
 import json
