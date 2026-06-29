@@ -14,6 +14,8 @@
 
 """Node to communicate with a local policy server."""
 
+from wsgiref.util import request_uri
+
 import argparse
 import dora
 import json
@@ -56,7 +58,7 @@ def _main_dora(io, shared_dir):
             data_files.append(data_file)
             if len(data_files) > n_keep_data:
                 data_files.pop(0)
-            return reset, {
+            return {
                 "name": "inference",
                 "data_path": data_file.name,
                 "reset": reset,
@@ -86,7 +88,7 @@ def _main_dora(io, shared_dir):
         #     "camera_ceiling": pa.list_(pa.uint8()),
         #     }
         #   }
-        reset, request = prepare_request()
+        request = prepare_request()
         io.write(json.dumps(request) + "\n")
         io.flush()
 
@@ -110,7 +112,7 @@ def _main_dora(io, shared_dir):
             # "reset" signals that these actions are the first of a new episode,
             # so downstream nodes can drop any state carried over from the
             # previous episode.
-            metadata = {"interval": actions["interval"], "reset": reset}
+            metadata = {"interval": actions["interval"], "reset": request["reset"]}
             if "cutoff_hz" in actions:
                 metadata["cutoff_hz"] = actions["cutoff_hz"]
             node.send_output(
