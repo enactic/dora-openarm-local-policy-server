@@ -98,7 +98,7 @@ def serve_dora(
             from dora import Node
         except ImportError as exc:
             raise RuntimeError(
-                "Install openarm-policy-runtime[dora] or [dora1] in the model environment"
+                "Install openarm-policy-runtime[dora] in a Python >=3.11 model environment"
             ) from exc
         node = Node()
     state = LatestInput()
