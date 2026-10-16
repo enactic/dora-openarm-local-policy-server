@@ -14,43 +14,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""An example local policy server."""
+"""A checkpoint-free full-chunk model service for the SHM caller."""
 
 import sys
-import json
-import pyarrow as pa
-import socket
+import numpy as np
+from openarm_policy_runtime import Backend, ModelSession, Prediction, serve
 
 
-def _infer(observation):
-    positions = []
-    position = observation["position"].values.to_numpy()
-    delta = 0.01
-    for i in range(10):
-        positions.append(position.tolist())
-        position += delta  # Move a bit
-    return {
-        "interval": 1_000_000,  # Action per millisecond
-        "positions": positions,
-    }
+class ExamplePolicy(Backend):
+    def predict(self, observation):
+        qpos = observation.qpos[observation.current_index()]
+        positions = qpos[None, :] + np.arange(10, dtype=np.float32)[:, None] * 0.01
+        return Prediction(positions, interval_ns=1_000_000)
 
 
 def main():
-    """Infer the next actions from observations."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.bind(sys.argv[1])
-        sock.listen()
-        with sock.accept()[0] as connection:
-            with connection.makefile("rw") as io:
-                for request_json in io:
-                    request = json.loads(request_json)
-
-                    with pa.OSFile(request["data_path"], "rb") as source:
-                        with pa.ipc.open_file(source) as reader:
-                            observation = reader.get_batch(0).to_struct_array()[0]
-                            actions = _infer(observation)
-                            io.write(json.dumps(actions) + "\n")
-                            io.flush()
+    """Serve complete predictions; the caller selects the execution window."""
+    backend = ExamplePolicy()
+    serve(sys.argv[1], lambda: ModelSession(backend))
 
 
 if __name__ == "__main__":
